@@ -130,8 +130,24 @@ export function isLordKnight(clase: string): boolean {
 }
 
 /**
- * Creator/Biochemist tiene menor prioridad como Soporte.
- * Solo cubre slots de Soporte cuando ya no hay Bard/Gypsy/HP disponibles.
+ * Músicos (Bard/Gypsy y evoluciones) — máximo 1 por party.
+ */
+export function isMusicianClass(clase: string): boolean {
+  const key = clase.toLowerCase().replace(/[^a-z]/g, '');
+  return ['bard', 'minstrel', 'maestro', 'clown', 'dancer', 'gypsy', 'wanderer'].includes(key);
+}
+
+/**
+ * Healers puros (Priest / High Priest / Archbishop) — máximo 1 por party.
+ */
+export function isHealerClass(clase: string): boolean {
+  const key = clase.toLowerCase().replace(/[^a-z]/g, '');
+  return ['acolyte', 'priest', 'highpriest', 'hp', 'archbishop'].includes(key);
+}
+
+/**
+ * Creator/Biochemist — soporte de última prioridad, no cuenta para el límite
+ * de músico ni de healer, puede convivir con cualquiera de los dos.
  */
 export function isCreatorClass(clase: string): boolean {
   const key = clase.toLowerCase().replace(/[^a-z]/g, '');
