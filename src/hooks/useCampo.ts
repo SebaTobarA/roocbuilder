@@ -30,18 +30,13 @@ function computeQuota(slots: SlotLabel[]): Record<Role, number> {
   return quota;
 }
 
-// Toma un jugador cuya clase no esté ya en la party (best-effort: si todos tienen
-// clase repetida, toma el primero de todos modos).
+// Toma el primer jugador cuya clase no esté ya en la party.
+// Si todos tienen clase repetida, deja el slot vacío (undefined) para que la
+// party quede incompleta en lugar de meter duplicados.
 function pickUnique(pool: Player[], usedClasses: Set<string>): Player | undefined {
   const idx = pool.findIndex(p => !usedClasses.has(p.clase.toLowerCase()));
   if (idx !== -1) {
     const [p] = pool.splice(idx, 1);
-    usedClasses.add(p.clase.toLowerCase());
-    return p;
-  }
-  // Todos tienen clase repetida — igual se asigna
-  if (pool.length > 0) {
-    const p = pool.shift()!;
     usedClasses.add(p.clase.toLowerCase());
     return p;
   }
@@ -193,22 +188,21 @@ export function useCampo(initialSlots?: SlotLabel[], options: UseCampoOptions = 
       const quota = computeQuota(currentSlots);
       const partySize = currentSlots.length;
 
-      const lksNeededAsTank = Math.max(0, quota.Tank - byRole.Tank.length);
-      const lksForDPS = lordKnights.length - lksNeededAsTank;
-
-      const canFillTank = byRole.Tank.length + lordKnights.length >= quota.Tank;
-      const canFillDPS  = byRole.DPS.length + Math.max(0, lksForDPS) >= quota.DPS;
-      const supportCapacity =
-        (musicianPool.length > 0 ? 1 : 0) +
-        (healerPool.length   > 0 ? 1 : 0) +
-        creatorPool.length;
-      const canFillSupport = supportCapacity >= quota.Support;
-
       const remaining =
         byRole.Tank.length + byRole.DPS.length + lordKnights.length +
         musicianPool.length + healerPool.length + creatorPool.length + byRole.Flexible.length;
 
-      if (!canFillTank || !canFillSupport || !canFillDPS || remaining < partySize) break;
+      if (remaining === 0) break;
+
+      // Detener cuando ya no hay jugadores para los roles esenciales (Tank / Soporte).
+      // Los DPS sobrantes quedan sin asignar para que "Sugerir distribución" los coloque.
+      const hasEssentialTank =
+        quota.Tank === 0 || byRole.Tank.length + lordKnights.length > 0;
+      const supportLeft =
+        musicianPool.length + healerPool.length + creatorPool.length;
+      const hasEssentialSupport = quota.Support === 0 || supportLeft > 0;
+
+      if (!hasEssentialTank || !hasEssentialSupport) break;
 
       index++;
       const party: Party = { id: nextId('party'), name: `Party ${index}`, capacity: partySize };
@@ -285,9 +279,14 @@ export function useCampo(initialSlots?: SlotLabel[], options: UseCampoOptions = 
 
     const targetSize = Math.max(1, compositionsRef.current[0].length);
     const numGroups = Math.ceil(unassignedPlayers.length / targetSize);
-    const sorted = [...unassignedPlayers].sort(
-      (a, b) => ROLE_ORDER[a.rol] - ROLE_ORDER[b.rol]
-    );
+
+    // Ordena por rol y luego por clase para que el round-robin reparta clases
+    // iguales entre grupos distintos en vez de agruparlas en el mismo.
+    const sorted = [...unassignedPlayers].sort((a, b) => {
+      const roleOrder = ROLE_ORDER[a.rol] - ROLE_ORDER[b.rol];
+      if (roleOrder !== 0) return roleOrder;
+      return a.clase.localeCompare(b.clase);
+    });
 
     const groups: Player[][] = Array.from({ length: numGroups }, () => []);
     sorted.forEach((p, i) => groups[i % numGroups].push(p));
