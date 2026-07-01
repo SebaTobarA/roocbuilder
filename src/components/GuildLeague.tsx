@@ -1,0 +1,152 @@
+import React, { useState } from 'react';
+import { Upload } from 'lucide-react';
+import { Campo } from './Campo';
+import { SlotPicker } from './SlotPicker';
+import { useCampo } from '../hooks/useCampo';
+import type { SlotLabel } from '../types';
+
+const PLACEHOLDERS = [
+  'Nick1,Crusader;Nick2,Wizard',
+  'Nick1,Sniper;Nick2,HighPriest',
+  'Nick1,Paladin;Nick2,HighWizard',
+];
+
+export function GuildLeague() {
+  const campo1 = useCampo();
+  const campo2 = useCampo();
+
+  const [raw1, setRaw1] = useState('');
+  const [raw2, setRaw2] = useState('');
+  const [importMsg, setImportMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [copySlots, setCopySlots] = useState(true);
+
+  const placeholder = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
+
+  function handleImport() {
+    const t1 = raw1.trim();
+    const t2 = raw2.trim();
+    if (!t1 && !t2) return;
+
+    let totalAdded = 0;
+    const allSkipped: string[] = [];
+
+    if (t1) {
+      const r = campo1.importPlayers(t1);
+      totalAdded += r.added;
+      allSkipped.push(...r.skipped);
+      setRaw1('');
+    }
+    if (t2) {
+      const r = campo2.importPlayers(t2);
+      totalAdded += r.added;
+      allSkipped.push(...r.skipped);
+      setRaw2('');
+    }
+
+    if (totalAdded > 0) {
+      const msg = `${totalAdded} jugador(es) importado(s)${allSkipped.length ? `. Omitidos: ${allSkipped.join(', ')}` : ''}.`;
+      setImportMsg({ text: msg, ok: true });
+    } else {
+      setImportMsg({ text: `Sin resultados válidos. Omitidos: ${allSkipped.join(', ')}`, ok: false });
+    }
+    setTimeout(() => setImportMsg(null), 4000);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleImport();
+  }
+
+  function handleComps1(comps: SlotLabel[][]) {
+    campo1.setCompositions(comps);
+    if (copySlots) campo2.setCompositions(comps);
+  }
+
+  function handleCopySlots(checked: boolean) {
+    setCopySlots(checked);
+    if (checked) campo2.setCompositions(campo1.compositions);
+  }
+
+  return (
+    <div className="guild-layout">
+
+      {/* ── Sección de importación dual ── */}
+      <div className="gl-import-section">
+        <p className="import-hint">
+          Pega tu lista desde Excel o escribe: <code>Nick,Clase;Nick,Clase</code>
+        </p>
+        <div className="gl-import-grid">
+          <div className="gl-import-col">
+            <p className="gl-import-heading">Campo Principal (Élite)</p>
+            <textarea
+              className="import-textarea"
+              rows={4}
+              placeholder={placeholder}
+              value={raw1}
+              onChange={e => setRaw1(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+          <div className="gl-import-col">
+            <p className="gl-import-heading">Campo Secundario</p>
+            <textarea
+              className="import-textarea"
+              rows={4}
+              placeholder={placeholder}
+              value={raw2}
+              onChange={e => setRaw2(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+        </div>
+        <div className="import-actions">
+          <button className="btn btn-primary" onClick={handleImport}>
+            <Upload size={14} />
+            Importar ambos campos
+          </button>
+        </div>
+        {importMsg && (
+          <p className={`import-message ${importMsg.ok ? 'success' : 'error'}`}>
+            {importMsg.text}
+          </p>
+        )}
+      </div>
+
+      {/* ── Composición Campo Principal ── */}
+      <SlotPicker
+        title="Composición de Party para campo principal"
+        compositions={campo1.compositions}
+        onChange={handleComps1}
+        extraFooter={
+          <label className="copy-slots-label">
+            <input
+              type="checkbox"
+              checked={copySlots}
+              onChange={e => handleCopySlots(e.target.checked)}
+            />
+            <span>Aplicar misma composición al Campo Secundario</span>
+          </label>
+        }
+      />
+
+      {/* ── Campo Principal ── */}
+      <Campo
+        label="Campo Principal (Élite)"
+        campo={campo1}
+        showSlotsImmediately
+        hideImport
+        hideSlotPicker
+      />
+
+      <hr className="campo-divider" />
+
+      {/* ── Campo Secundario ── */}
+      <Campo
+        label="Campo Secundario"
+        campo={campo2}
+        showSlotsImmediately
+        hideImport
+        hideSlotPicker={copySlots}
+      />
+    </div>
+  );
+}
