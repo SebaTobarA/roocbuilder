@@ -74,10 +74,10 @@ const CLASS_ROLE: Record<string, Role> = {
   archbishop: 'Support',
 
   // Mage → Sage → Professor → Sorcerer
-  sage:      'Support',
-  professor: 'Support',
-  prof:      'Support',
-  sorcerer:  'Support',
+  sage:      'DPS',
+  professor: 'DPS',
+  prof:      'DPS',
+  sorcerer:  'DPS',
 
   // Archer → Bard → Minstrel → Maestro
   bard:     'Support',
