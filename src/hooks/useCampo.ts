@@ -30,13 +30,36 @@ function computeQuota(slots: SlotLabel[]): Record<Role, number> {
   return quota;
 }
 
+// Toma un jugador cuya clase no esté ya en la party (best-effort: si todos tienen
+// clase repetida, toma el primero de todos modos).
+function pickUnique(pool: Player[], usedClasses: Set<string>): Player | undefined {
+  const idx = pool.findIndex(p => !usedClasses.has(p.clase.toLowerCase()));
+  if (idx !== -1) {
+    const [p] = pool.splice(idx, 1);
+    usedClasses.add(p.clase.toLowerCase());
+    return p;
+  }
+  // Todos tienen clase repetida — igual se asigna
+  if (pool.length > 0) {
+    const p = pool.shift()!;
+    usedClasses.add(p.clase.toLowerCase());
+    return p;
+  }
+  return undefined;
+}
+
+export interface UseCampoOptions {
+  maxPlayers?: number; // alerta si se supera en importación
+  minPlayers?: number; // alerta si no se alcanza en organización
+}
+
 export interface UseCampoReturn {
   players: Player[];
   parties: Party[];
   compositions: SlotLabel[][];
   setCompositions: (c: SlotLabel[][]) => void;
   importPlayers: (raw: string) => ImportResult;
-  organizeParties: () => boolean;
+  organizeParties: () => string | null; // null = ok, string = error
   suggestDistribution: () => void;
   assignPlayer: (playerId: string, partyId: string | null) => void;
   removePlayer: (playerId: string) => void;
@@ -46,7 +69,9 @@ export interface UseCampoReturn {
   hasPlayers: boolean;
 }
 
-export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
+export function useCampo(initialSlots?: SlotLabel[], options: UseCampoOptions = {}): UseCampoReturn {
+  const { maxPlayers, minPlayers } = options;
+
   const [players, setPlayers] = useState<Player[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [compositions, setCompositionsState] = useState<SlotLabel[][]>([
@@ -77,12 +102,27 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
   }, []);
 
   const importPlayers = useCallback((raw: string): ImportResult => {
+    const existing = playersRef.current;
+
+    // Límite máximo de jugadores por campo
+    if (maxPlayers !== undefined && existing.length >= maxPlayers) {
+      return {
+        added: 0,
+        skipped: [],
+        limitError: `Este campo tiene un límite de ${maxPlayers} jugadores y ya está lleno.`,
+      };
+    }
+
     const entries = parseEntries(raw);
     const added: Player[] = [];
     const skipped: string[] = [];
-    const existing = playersRef.current;
+    const slotsLeft = maxPlayers !== undefined ? maxPlayers - existing.length : Infinity;
 
     for (const entry of entries) {
+      if (added.length >= slotsLeft) {
+        skipped.push(`(límite alcanzado — máx. ${maxPlayers} jugadores)`);
+        break;
+      }
       const parts = entry.split(',').map(s => s.trim());
       if (parts.length < 2 || !parts[0] || !parts[1]) {
         skipped.push(entry || '(vacío)');
@@ -112,25 +152,34 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
       setPlayers(prev => [...prev, ...added]);
     }
 
-    return { added: added.length, skipped };
-  }, []);
+    const limitError =
+      maxPlayers !== undefined && existing.length + added.length >= maxPlayers
+        ? `Se alcanzó el límite de ${maxPlayers} jugadores para este campo.`
+        : undefined;
+
+    return { added: added.length, skipped, limitError };
+  }, [maxPlayers]);
 
   // Cicla entre composiciones. Lord Knights son DPS primario; si faltan Tanks
-  // (Paladines), se usan LKs como tanques de emergencia (cambia su color a azul).
-  const organizeParties = useCallback((): boolean => {
-    const comps = compositionsRef.current;
+  // (Paladines), se usan LKs como tanques de emergencia.
+  // Nunca repite clase en una misma party salvo que sea inevitable.
+  const organizeParties = useCallback((): string | null => {
     const all = playersRef.current;
 
-    // Separar LKs del resto del pool DPS
-    const lordKnights = all.filter(p => p.rol === 'DPS' && isLordKnight(p.clase)).slice();
-    // Soporte: 3 categorías — max 1 músico y max 1 healer por party; Creator como comodín
-    const musicianPool = all.filter(p => p.rol === 'Support' && isMusicianClass(p.clase)).slice();
-    const healerPool   = all.filter(p => p.rol === 'Support' && isHealerClass(p.clase)).slice();
-    const creatorPool  = all.filter(p => p.rol === 'Support' && isCreatorClass(p.clase)).slice();
+    if (minPlayers !== undefined && all.length < minPlayers) {
+      return `Se necesitan al menos ${minPlayers} jugadores para organizar parties (actualmente hay ${all.length}).`;
+    }
+
+    const comps = compositionsRef.current;
+
+    const lordKnights  = all.filter(p => p.rol === 'DPS'     && isLordKnight(p.clase)).slice();
+    const musicianPool = all.filter(p => p.rol === 'Support'  && isMusicianClass(p.clase)).slice();
+    const healerPool   = all.filter(p => p.rol === 'Support'  && isHealerClass(p.clase)).slice();
+    const creatorPool  = all.filter(p => p.rol === 'Support'  && isCreatorClass(p.clase)).slice();
     const byRole: Record<Role, Player[]> = {
       Tank:     all.filter(p => p.rol === 'Tank').slice(),
       DPS:      all.filter(p => p.rol === 'DPS' && !isLordKnight(p.clase)).slice(),
-      Support:  [], // no usado directamente — ver lógica de soporte abajo
+      Support:  [],
       Flexible: all.filter(p => p.rol === 'Flexible').slice(),
     };
 
@@ -144,13 +193,11 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
       const quota = computeQuota(currentSlots);
       const partySize = currentSlots.length;
 
-      // LKs disponibles para Tank sólo si no alcanzan los Tanques reales
       const lksNeededAsTank = Math.max(0, quota.Tank - byRole.Tank.length);
       const lksForDPS = lordKnights.length - lksNeededAsTank;
 
       const canFillTank = byRole.Tank.length + lordKnights.length >= quota.Tank;
       const canFillDPS  = byRole.DPS.length + Math.max(0, lksForDPS) >= quota.DPS;
-      // Por party: máximo 1 músico + máximo 1 healer + cualquier número de creators
       const supportCapacity =
         (musicianPool.length > 0 ? 1 : 0) +
         (healerPool.length   > 0 ? 1 : 0) +
@@ -164,66 +211,62 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
       if (!canFillTank || !canFillSupport || !canFillDPS || remaining < partySize) break;
 
       index++;
-      const party: Party = {
-        id: nextId('party'),
-        name: `Party ${index}`,
-        capacity: partySize,
-      };
+      const party: Party = { id: nextId('party'), name: `Party ${index}`, capacity: partySize };
+      const usedClasses = new Set<string>();
 
       // Tank: Paladines primero, LKs de emergencia
       for (let i = 0; i < quota.Tank; i++) {
-        const real = byRole.Tank.shift();
+        const real = pickUnique(byRole.Tank, usedClasses);
         if (real) {
           assignments[real.id] = party.id;
         } else {
-          const lk = lordKnights.shift();
-          if (lk) {
-            assignments[lk.id] = party.id;
-            roleOverrides[lk.id] = 'Tank'; // muestra azul en el chip
-          }
+          const lk = pickUnique(lordKnights, usedClasses);
+          if (lk) { assignments[lk.id] = party.id; roleOverrides[lk.id] = 'Tank'; }
         }
       }
 
-      // Soporte: max 1 músico y max 1 healer por party — Creator como comodín
+      // Soporte: max 1 músico + max 1 healer por party; Creator como comodín
       let usedMusician = false;
       let usedHealer   = false;
       for (let i = 0; i < quota.Support; i++) {
         let p: Player | undefined;
         if (!usedMusician && musicianPool.length > 0) {
-          p = musicianPool.shift();
+          p = pickUnique(musicianPool, usedClasses);
           usedMusician = true;
         } else if (!usedHealer && healerPool.length > 0) {
-          p = healerPool.shift();
+          p = pickUnique(healerPool, usedClasses);
           usedHealer = true;
         } else {
-          p = creatorPool.shift();
+          p = pickUnique(creatorPool, usedClasses);
         }
         if (p) assignments[p.id] = party.id;
       }
 
       // DPS: regulares primero, LKs restantes
       for (let i = 0; i < quota.DPS; i++) {
-        const p = byRole.DPS.shift() ?? lordKnights.shift();
+        const p = pickUnique(byRole.DPS, usedClasses) ?? pickUnique(lordKnights, usedClasses);
         if (p) assignments[p.id] = party.id;
       }
 
-      // Flexible: Creators primero como comodín, luego el resto
+      // Flexible: Creators de comodín, luego el resto
       for (let i = 0; i < quota.Flexible; i++) {
         const p =
-          byRole.Flexible.shift() ??
-          creatorPool.shift() ??
-          byRole.DPS.shift() ??
-          lordKnights.shift() ??
-          musicianPool.shift() ??
-          healerPool.shift() ??
-          byRole.Tank.shift();
+          pickUnique(byRole.Flexible, usedClasses) ??
+          pickUnique(creatorPool,     usedClasses) ??
+          pickUnique(byRole.DPS,      usedClasses) ??
+          pickUnique(lordKnights,     usedClasses) ??
+          pickUnique(musicianPool,    usedClasses) ??
+          pickUnique(healerPool,      usedClasses) ??
+          pickUnique(byRole.Tank,     usedClasses);
         if (p) assignments[p.id] = party.id;
       }
 
       newParties.push(party);
     }
 
-    if (newParties.length === 0) return false;
+    if (newParties.length === 0) {
+      return 'No hay suficientes jugadores para armar al menos una party con esa composición.';
+    }
 
     setParties(newParties);
     setPlayers(prev =>
@@ -233,8 +276,8 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
         ...(roleOverrides[p.id] ? { rol: roleOverrides[p.id] } : {}),
       }))
     );
-    return true;
-  }, []);
+    return null;
+  }, [minPlayers]);
 
   const suggestDistribution = useCallback(() => {
     const unassignedPlayers = playersRef.current.filter(p => !p.partyId);

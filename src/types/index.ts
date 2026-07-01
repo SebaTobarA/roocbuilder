@@ -21,4 +21,5 @@ export interface Party {
 export interface ImportResult {
   added: number;
   skipped: string[];
+  limitError?: string;
 }

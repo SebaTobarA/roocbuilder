@@ -12,8 +12,8 @@ const PLACEHOLDERS = [
 ];
 
 export function GuildLeague() {
-  const campo1 = useCampo();
-  const campo2 = useCampo();
+  const campo1 = useCampo(undefined, { maxPlayers: 40 });
+  const campo2 = useCampo(undefined, { maxPlayers: 40 });
 
   const [raw1, setRaw1] = useState('');
   const [raw2, setRaw2] = useState('');
@@ -29,23 +29,28 @@ export function GuildLeague() {
 
     let totalAdded = 0;
     const allSkipped: string[] = [];
+    let r1, r2;
 
     if (t1) {
-      const r = campo1.importPlayers(t1);
-      totalAdded += r.added;
-      allSkipped.push(...r.skipped);
+      r1 = campo1.importPlayers(t1);
+      totalAdded += r1.added;
+      allSkipped.push(...r1.skipped);
       setRaw1('');
     }
     if (t2) {
-      const r = campo2.importPlayers(t2);
-      totalAdded += r.added;
-      allSkipped.push(...r.skipped);
+      r2 = campo2.importPlayers(t2);
+      totalAdded += r2.added;
+      allSkipped.push(...r2.skipped);
       setRaw2('');
     }
 
+    const limitErrors = [r1?.limitError, r2?.limitError].filter(Boolean).join(' ');
+
     if (totalAdded > 0) {
-      const msg = `${totalAdded} jugador(es) importado(s)${allSkipped.length ? `. Omitidos: ${allSkipped.join(', ')}` : ''}.`;
+      const msg = `${totalAdded} jugador(es) importado(s)${allSkipped.length ? `. Omitidos: ${allSkipped.join(', ')}` : ''}${limitErrors ? ` ⚠ ${limitErrors}` : ''}.`;
       setImportMsg({ text: msg, ok: true });
+    } else if (limitErrors) {
+      setImportMsg({ text: `⚠ ${limitErrors}`, ok: false });
     } else {
       setImportMsg({ text: `Sin resultados válidos. Omitidos: ${allSkipped.join(', ')}`, ok: false });
     }

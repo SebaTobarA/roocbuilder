@@ -61,10 +61,8 @@ export function Campo({
 
   function handleOrganize() {
     setOrganizeError('');
-    const ok = organizeParties();
-    if (!ok) {
-      setOrganizeError('No hay suficientes jugadores para armar al menos una party con esa composición.');
-    }
+    const error = organizeParties();
+    if (error) setOrganizeError(error);
   }
 
   function handleSuggest() {
