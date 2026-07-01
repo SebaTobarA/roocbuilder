@@ -4,6 +4,7 @@ import type { EventType } from './types';
 import { EventSelector } from './components/EventSelector';
 import { GuildLeague } from './components/GuildLeague';
 import { EmperiumOverrun } from './components/EmperiumOverrun';
+import { Footer } from './components/Footer';
 
 const EVENT_LABEL: Record<NonNullable<EventType>, string> = {
   guild: 'Guild League',
@@ -17,6 +18,7 @@ export default function App() {
     return (
       <div className="app-shell">
         <EventSelector onSelect={setEvent} />
+        <Footer />
       </div>
     );
   }
@@ -39,6 +41,8 @@ export default function App() {
         {event === 'guild' && <GuildLeague />}
         {event === 'emperium' && <EmperiumOverrun />}
       </main>
+
+      <Footer />
     </div>
   );
 }

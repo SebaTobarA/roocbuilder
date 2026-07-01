@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Player, Party, SlotLabel, Role, ImportResult } from '../types';
 import { parseEntries } from '../utils/parseEntries';
-import { inferRole, isLordKnight, normalizeClass } from '../utils/inferRole';
+import { inferRole, isLordKnight, isCreatorClass, normalizeClass } from '../utils/inferRole';
 
 export const DEFAULT_SLOTS: SlotLabel[] = ['Tanque', 'Soporte', 'Daño', 'Daño', 'Daño'];
 
@@ -123,10 +123,13 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
 
     // Separar LKs del resto del pool DPS
     const lordKnights = all.filter(p => p.rol === 'DPS' && isLordKnight(p.clase)).slice();
+    // Soporte prioritario: Bard/Gypsy/HP — Creator solo como último recurso
+    const prioritySupport = all.filter(p => p.rol === 'Support' && !isCreatorClass(p.clase)).slice();
+    const creatorPool     = all.filter(p => p.rol === 'Support' &&  isCreatorClass(p.clase)).slice();
     const byRole: Record<Role, Player[]> = {
       Tank:     all.filter(p => p.rol === 'Tank').slice(),
       DPS:      all.filter(p => p.rol === 'DPS' && !isLordKnight(p.clase)).slice(),
-      Support:  all.filter(p => p.rol === 'Support').slice(),
+      Support:  prioritySupport, // alias — se llena primero con prioridad
       Flexible: all.filter(p => p.rol === 'Flexible').slice(),
     };
 
@@ -145,12 +148,12 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
       const lksForDPS = lordKnights.length - lksNeededAsTank;
 
       const canFillTank    = byRole.Tank.length + lordKnights.length >= quota.Tank;
-      const canFillSupport = byRole.Support.length >= quota.Support;
+      const canFillSupport = prioritySupport.length + creatorPool.length >= quota.Support;
       const canFillDPS     = byRole.DPS.length + Math.max(0, lksForDPS) >= quota.DPS;
 
       const remaining =
         byRole.Tank.length + byRole.DPS.length + lordKnights.length +
-        byRole.Support.length + byRole.Flexible.length;
+        prioritySupport.length + creatorPool.length + byRole.Flexible.length;
 
       if (!canFillTank || !canFillSupport || !canFillDPS || remaining < partySize) break;
 
@@ -175,9 +178,9 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
         }
       }
 
-      // Soporte
+      // Soporte: Bard/Gypsy/HP primero, Creator solo si no hay prioridad
       for (let i = 0; i < quota.Support; i++) {
-        const p = byRole.Support.shift();
+        const p = prioritySupport.shift() ?? creatorPool.shift();
         if (p) assignments[p.id] = party.id;
       }
 
@@ -187,13 +190,14 @@ export function useCampo(initialSlots?: SlotLabel[]): UseCampoReturn {
         if (p) assignments[p.id] = party.id;
       }
 
-      // Flexible
+      // Flexible: Creators primero como flex, luego el resto
       for (let i = 0; i < quota.Flexible; i++) {
         const p =
           byRole.Flexible.shift() ??
+          creatorPool.shift() ??
           byRole.DPS.shift() ??
           lordKnights.shift() ??
-          byRole.Support.shift() ??
+          prioritySupport.shift() ??
           byRole.Tank.shift();
         if (p) assignments[p.id] = party.id;
       }

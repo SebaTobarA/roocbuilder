@@ -128,3 +128,12 @@ export function isLordKnight(clase: string): boolean {
   const key = clase.toLowerCase().replace(/[^a-z]/g, '');
   return key === 'lordknight' || key === 'lk';
 }
+
+/**
+ * Creator/Biochemist tiene menor prioridad como Soporte.
+ * Solo cubre slots de Soporte cuando ya no hay Bard/Gypsy/HP disponibles.
+ */
+export function isCreatorClass(clase: string): boolean {
+  const key = clase.toLowerCase().replace(/[^a-z]/g, '');
+  return ['alchemist', 'biochemist', 'geneticist', 'creator'].includes(key);
+}
